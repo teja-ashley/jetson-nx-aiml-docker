@@ -1,0 +1,78 @@
+services:
+  nodered:
+    container_name: nodered
+    image: nodered/node-red:latest
+    restart: unless-stopped
+    ports:
+      - "1881:1880"
+    volumes:
+      - /opt/cartloading/nodered/data:/data
+      - /home/afi/Documents/Teja/shared_scripts:/scripts:ro
+      - /var/run/docker.sock:/var/run/docker.sock # for monitoring containers from node-red (optional)
+    networks:
+      - cartloading-network
+    environment:
+      - TZ=America/New_York
+    healthcheck:
+      test: ["CMD-SHELL", "node /healthcheck.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        compress: "true"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  opencv:
+    container_name: opencv-gpu
+    #image: dustynv/l4t-pytorch:r36.2.0 # added image in Dockerfile.opencv
+    build:
+      context: .                     #file in same directory as docker-compose.yml file path. for now /Documents/Teja
+      dockerfile: Dockerfile.opencv
+    restart: unless-stopped
+    runtime: nvidia
+    ports:
+      - "5001:5001"  # OpenCV API server port
+      - "5002:5002"  # MJPEG live streaming port
+    volumes:
+      - /home/afi/Documents/Teja/shared_scripts:/workspace/scripts
+    networks:
+      - cartloading-network
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - TZ=America/New_York
+    command: ["python3", "/workspace/scripts/opencv_api_server.py"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+        compress: "true"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+networks:
+  cartloading-network:
+    driver: bridge
+    name: cartloading-network
