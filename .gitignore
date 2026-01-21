@@ -1,0 +1,57 @@
+# Large video files
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker volumes and data
+nodered-backup-*/
+
+# Output directories
+liveframes/
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+
+# Exclude misc files and folders at root level
+/misc-files/
+/nodered-backup-20251226/
+/AprilTag_Dashboard.json
+/AprilTag_Dashboard_IMPROVED.json
+/Apriltag_Mqtt-Noderedflow.json
+/apriltag_python-Noderedflow.json
+/CUDA_installationNotes.md
+/Hardware_Specs.md
+/known_issues.md
+/benchmarkTest.py
+/openCV_CUDAtestcontainer.py
+/Dockerfile.opencv
+/docker-compose.yml
+/docker-compose-setup-readme.md
+/requirements.txt
+/apriltag_detector.py
+

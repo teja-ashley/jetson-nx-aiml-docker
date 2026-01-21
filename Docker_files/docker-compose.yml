@@ -36,7 +36,7 @@ services:
     container_name: opencv-gpu
     #image: dustynv/l4t-pytorch:r36.2.0 # added image in Dockerfile.opencv
     build:
-      context: .                     #file in same directory as docker-compose.yml file path. for now /Documents/Teja
+      context: .                     # Docker_files directory
       dockerfile: Dockerfile.opencv
     restart: unless-stopped
     runtime: nvidia
@@ -51,8 +51,8 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
       - TZ=America/New_York
-    command: ["tail", "-f", "/dev/null"] 
-    #command: ["python3", "/workspace/scripts/opencv_api_server.py"]
+    #command: ["tail", "-f", "/dev/null"] 
+    command: ["python3", "/workspace/scripts/opencv_api_server.py"]
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:5001/health || exit 1"]
       interval: 30s

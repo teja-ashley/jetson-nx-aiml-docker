@@ -134,6 +134,12 @@ docker compose ps
 
 # Check logs
 docker compose logs -f
+
+# delete image cache After building
+sudo docker builder prune -a -f
+sudo docker buildx prune -a -f
+sudo docker image prune -a -f
+
 ```
 
 ### Step 4: Test Internal Network Communication

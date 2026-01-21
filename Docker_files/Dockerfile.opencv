@@ -1,4 +1,4 @@
-FROM dustynv/l4t-pytorch:r36.2.0
+FROM dustynv/l4t-pytorch:r36.4.0
 COPY requirements.txt /tmp/requirements.txt
 COPY pupil_apriltags-1.0.4.post11-cp310-cp310-linux_aarch64.whl /tmp/
 RUN pip install --extra-index-url https://pypi.org/simple/ --ignore-installed -r /tmp/requirements.txt

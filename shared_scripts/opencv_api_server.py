@@ -45,17 +45,16 @@ def test_gpu_simple():
         if cuda_count > 0:
             # Create small test image
             cpu_img = np.random.randint(0, 255, (640, 480, 3), dtype=np.uint8)
-            
-            # Upload to GPU
-            gpu_img = cv2.cuda_GpuMat()
-            gpu_img.upload(cpu_img)
-            
+
+            # Upload to GPU (OpenCV 4.10.0+ compatible)
+            gpu_img = cv2.cuda.GpuMat(cpu_img)
+
             # Resize on GPU
             gpu_resized = cv2.cuda.resize(gpu_img, (320, 240))
-            
+
             # Download result
             result_img = gpu_resized.download()
-            
+
             result["test_result"] = f"GPU processing successful! Resized {cpu_img.shape} to {result_img.shape}"
         else:
             result["test_result"] = "No CUDA devices found"
