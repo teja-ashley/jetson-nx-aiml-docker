@@ -3,14 +3,18 @@
 Flask REST API Server for OpenCV GPU Operations
 Runs inside opencv-test container
 Exposes endpoints for Node-RED to call
+
+Lightweight API server - GPU operations are executed as subprocesses
+This ensures GPU crashes don't affect the API server
 """
 
 from flask import Flask, jsonify, request
-import cv2
-import numpy as np
 from datetime import datetime
 import logging
-import traceback
+import subprocess
+import json
+import os
+import time
 
 app = Flask(__name__)
 
@@ -21,52 +25,171 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Path to GPU operations script
+GPU_OPERATIONS_SCRIPT = '/workspace/scripts/gpu_operations.py'
 
-def test_gpu_simple():
+# Path to PID test service script
+PID_TEST_SCRIPT = '/workspace/scripts/pid_test.py'
+
+# Track container startup time
+CONTAINER_START_TIME = datetime.now()
+CONTAINER_START_TIMESTAMP = time.time()
+
+
+def run_gpu_operation(operation, timeout=30):
     """
-    Simple GPU test - same logic as test_gpu_simple.py
-    Returns dict with test results
+    Run GPU operation as subprocess
+
+    Args:
+        operation: 'info' or 'test'
+        timeout: Maximum execution time in seconds
+
+    Returns:
+        dict: Result from GPU operation
     """
-    result = {
-        "timestamp": datetime.now().isoformat(),
-        "status": "success",
-        "opencv_version": cv2.__version__,
-        "cuda_available": False,
-        "cuda_devices": 0,
-        "test_result": ""
-    }
-    
     try:
-        # Check CUDA availability
-        cuda_count = cv2.cuda.getCudaEnabledDeviceCount()
-        result["cuda_available"] = cuda_count > 0
-        result["cuda_devices"] = cuda_count
-        
-        if cuda_count > 0:
-            # Create small test image
-            cpu_img = np.random.randint(0, 255, (640, 480, 3), dtype=np.uint8)
+        # Build command
+        cmd = ['python3', GPU_OPERATIONS_SCRIPT, f'--{operation}']
 
-            # Upload to GPU (OpenCV 4.10.0+ compatible)
-            gpu_img = cv2.cuda.GpuMat(cpu_img)
+        logger.info(f"Executing GPU operation: {operation}")
 
-            # Resize on GPU
-            gpu_resized = cv2.cuda.resize(gpu_img, (320, 240))
+        # Run subprocess with timeout
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd='/workspace/scripts'
+        )
 
-            # Download result
-            result_img = gpu_resized.download()
-
-            result["test_result"] = f"GPU processing successful! Resized {cpu_img.shape} to {result_img.shape}"
+        # Parse JSON output from stdout
+        if result.stdout:
+            output = json.loads(result.stdout)
+            logger.info(f"GPU operation {operation} completed with status: {output.get('status', 'unknown')}")
+            return output
         else:
-            result["test_result"] = "No CUDA devices found"
-            result["status"] = "warning"
-            
+            # No output - return error
+            error_msg = result.stderr if result.stderr else "No output from GPU operation"
+            logger.error(f"GPU operation {operation} failed: {error_msg}")
+            return {
+                "status": "error",
+                "timestamp": datetime.now().isoformat(),
+                "error": error_msg
+            }
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"GPU operation {operation} timed out after {timeout} seconds")
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error": f"Operation timed out after {timeout} seconds"
+        }
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse GPU operation output: {e}")
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error": f"Failed to parse output: {str(e)}",
+            "raw_output": result.stdout if 'result' in locals() else None
+        }
+
     except Exception as e:
-        result["status"] = "error"
-        result["test_result"] = f"Error: {str(e)}"
-        result["error_details"] = traceback.format_exc()
-        logger.error(f"GPU test failed: {e}\n{traceback.format_exc()}")
-    
-    return result
+        logger.error(f"Unexpected error running GPU operation {operation}: {e}")
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        }
+
+
+def run_pid_test_operation(operation, timeout=10):
+    """
+    Run PID test service operation as subprocess
+
+    Args:
+        operation: 'start', 'stop', or 'status'
+        timeout: Maximum execution time in seconds
+
+    Returns:
+        dict: Result from PID test operation
+    """
+    try:
+        # Build command
+        cmd = ['python3', PID_TEST_SCRIPT, f'--{operation}']
+
+        logger.info(f"Executing PID test operation: {operation}")
+
+        # For 'start' operation, use Popen to run in background
+        if operation == 'start':
+            # Start process in background
+            # CRITICAL: Do NOT capture stderr/stdout to avoid pipe buffer deadlock
+            # Let output go to Docker logs instead
+            process = subprocess.Popen(
+                cmd,
+                stdout=None,
+                stderr=None,
+                cwd='/workspace/scripts'
+            )
+
+            # Return immediately with process info
+            logger.info(f"PID test service started in background (PID: {process.pid})")
+            return {
+                "status": "started",
+                "timestamp": datetime.now().isoformat(),
+                "message": "PID test service started in background",
+                "process_pid": process.pid
+            }
+
+        else:
+            # For 'stop' and 'status', wait for completion
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd='/workspace/scripts'
+            )
+
+            # Parse JSON output from stdout
+            if result.stdout:
+                output = json.loads(result.stdout)
+                logger.info(f"PID test operation {operation} completed with status: {output.get('status', 'unknown')}")
+                return output
+            else:
+                # No output - return error
+                error_msg = result.stderr if result.stderr else "No output from PID test operation"
+                logger.error(f"PID test operation {operation} failed: {error_msg}")
+                return {
+                    "status": "error",
+                    "timestamp": datetime.now().isoformat(),
+                    "error": error_msg
+                }
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"PID test operation {operation} timed out after {timeout} seconds")
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error": f"Operation timed out after {timeout} seconds"
+        }
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse PID test operation output: {e}")
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error": f"Failed to parse output: {str(e)}",
+            "raw_output": result.stdout if 'result' in locals() else None
+        }
+
+    except Exception as e:
+        logger.error(f"Unexpected error running PID test operation {operation}: {e}")
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        }
 
 
 @app.route('/health', methods=['GET'])
@@ -79,57 +202,131 @@ def health_check():
     }), 200
 
 
+@app.route('/api/container/stats', methods=['GET'])
+def container_stats():
+    """
+    Get container statistics without using Docker socket
+
+    Returns:
+        - Container uptime (calculated from API server start time)
+        - Start timestamp
+        - Current timestamp
+        - Uptime in seconds
+        - Uptime in human-readable format
+
+    Note: This tracks the API server's uptime, which resets when:
+    - Container restarts
+    - API server crashes and restarts
+    - Manual restart of the API server
+    """
+    current_time = time.time()
+    uptime_seconds = current_time - CONTAINER_START_TIMESTAMP
+
+    # Calculate human-readable uptime
+    days = int(uptime_seconds // 86400)
+    hours = int((uptime_seconds % 86400) // 3600)
+    minutes = int((uptime_seconds % 3600) // 60)
+    seconds = int(uptime_seconds % 60)
+
+    uptime_human = f"{days}d {hours}h {minutes}m {seconds}s"
+
+    return jsonify({
+        "status": "success",
+        "container_name": "opencv-gpu",
+        "api_server_started_at": CONTAINER_START_TIME.isoformat(),
+        "current_time": datetime.now().isoformat(),
+        "uptime_seconds": round(uptime_seconds, 2),
+        "uptime_human": uptime_human,
+        "note": "Uptime resets when container or API server restarts"
+    }), 200
+
+
 @app.route('/api/gpu/test', methods=['GET', 'POST'])
 def gpu_test():
     """
-    Run simple GPU test
+    Run GPU test via subprocess
     GET or POST /api/gpu/test
     Returns JSON with test results
+
+    The GPU operation runs as a separate process and exits after completion,
+    automatically freeing GPU memory.
     """
     logger.info("GPU test endpoint called")
-    
-    try:
-        result = test_gpu_simple()
-        status_code = 200 if result["status"] == "success" else 500
-        return jsonify(result), status_code
-    
-    except Exception as e:
-        logger.error(f"Unexpected error in gpu_test: {e}\n{traceback.format_exc()}")
-        return jsonify({
-            "status": "error",
-            "timestamp": datetime.now().isoformat(),
-            "error": str(e),
-            "error_details": traceback.format_exc()
-        }), 500
+
+    # Run GPU test operation
+    result = run_gpu_operation('test', timeout=30)
+
+    # Return appropriate status code
+    status_code = 200 if result.get("status") == "success" else 500
+    return jsonify(result), status_code
 
 
 @app.route('/api/gpu/info', methods=['GET'])
 def gpu_info():
     """
-    Get GPU and OpenCV information
+    Get GPU and OpenCV information via subprocess
     GET /api/gpu/info
+
+    The GPU operation runs as a separate process and exits after completion,
+    automatically freeing GPU memory.
     """
     logger.info("GPU info endpoint called")
-    
-    try:
-        cuda_count = cv2.cuda.getCudaEnabledDeviceCount()
-        
-        info = {
-            "timestamp": datetime.now().isoformat(),
-            "opencv_version": cv2.__version__,
-            "cuda_available": cuda_count > 0,
-            "cuda_devices": cuda_count,
-            "build_info": cv2.getBuildInformation().split('\n')[:20]  # First 20 lines
-        }
-        
-        return jsonify(info), 200
-    
-    except Exception as e:
-        logger.error(f"Error getting GPU info: {e}")
-        return jsonify({
-            "status": "error",
-            "error": str(e)
-        }), 500
+
+    # Run GPU info operation
+    result = run_gpu_operation('info', timeout=10)
+
+    # Return appropriate status code
+    status_code = 200 if result.get("status") == "success" else 500
+    return jsonify(result), status_code
+
+
+@app.route('/api/pidtest/start', methods=['POST'])
+def pidtest_start():
+    """
+    Start PID test service in background
+    POST /api/pidtest/start
+
+    The service runs as a background process and publishes MQTT messages.
+    """
+    logger.info("PID test start endpoint called")
+
+    # Run PID test start operation (non-blocking)
+    result = run_pid_test_operation('start', timeout=5)
+
+    # Return appropriate status code
+    status_code = 200 if result.get("status") == "started" else 500
+    return jsonify(result), status_code
+
+
+@app.route('/api/pidtest/stop', methods=['POST'])
+def pidtest_stop():
+    """
+    Stop PID test service
+    POST /api/pidtest/stop
+    """
+    logger.info("PID test stop endpoint called")
+
+    # Run PID test stop operation
+    result = run_pid_test_operation('stop', timeout=5)
+
+    # Return appropriate status code
+    status_code = 200 if result.get("status") in ["stopped", "warning"] else 500
+    return jsonify(result), status_code
+
+
+@app.route('/api/pidtest/status', methods=['GET'])
+def pidtest_status():
+    """
+    Check PID test service status
+    GET /api/pidtest/status
+    """
+    logger.info("PID test status endpoint called")
+
+    # Run PID test status operation
+    result = run_pid_test_operation('status', timeout=5)
+
+    # Always return 200 for status check
+    return jsonify(result), 200
 
 
 @app.route('/', methods=['GET'])
@@ -141,23 +338,27 @@ def index():
         "endpoints": {
             "/health": "Health check",
             "/api/gpu/test": "Run GPU test (GET or POST)",
-            "/api/gpu/info": "Get GPU and OpenCV information"
+            "/api/gpu/info": "Get GPU and OpenCV information",
+            "/api/pidtest/start": "Start PID test service (POST)",
+            "/api/pidtest/stop": "Stop PID test service (POST)",
+            "/api/pidtest/status": "Check PID test service status (GET)"
         },
         "timestamp": datetime.now().isoformat()
     }), 200
 
 
 if __name__ == '__main__':
-    logger.info("Starting OpenCV GPU API Server...")
-    logger.info(f"OpenCV Version: {cv2.__version__}")
+    logger.info("Starting OpenCV GPU API Server (Lightweight Mode)...")
+    logger.info("GPU operations will be executed as subprocesses")
 
-    try:
-        cuda_count = cv2.cuda.getCudaEnabledDeviceCount()
-        logger.info(f"CUDA Devices: {cuda_count}")
-    except Exception as e:
-        logger.warning(f"Could not check CUDA devices: {e}")
+    # Check if GPU operations script exists
+    if os.path.exists(GPU_OPERATIONS_SCRIPT):
+        logger.info(f"GPU operations script found: {GPU_OPERATIONS_SCRIPT}")
+    else:
+        logger.warning(f"GPU operations script not found: {GPU_OPERATIONS_SCRIPT}")
 
     # Run Flask server
     # 0.0.0.0 allows external connections from other containers
+    # No GPU initialization here - keeps server lightweight and reliable
     app.run(host='0.0.0.0', port=5001, debug=False, threaded=True)
 
