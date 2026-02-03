@@ -54,4 +54,5 @@ liveframes/
 /docker-compose-setup-readme.md
 /requirements.txt
 /apriltag_detector.py
+/shared_scripts/old_files/
 

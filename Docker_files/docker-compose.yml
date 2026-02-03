@@ -67,11 +67,36 @@ services:
         compress: "true"
     deploy:
       resources:
-        reservations:
+        limits:
+          memory: 24G #Total 64GB, to be confirmed after actual testing. 
+          cpus: '6'
+        reservations: #minimum
+          memory: 8G
+          cpus: '4'
           devices:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+
+  portainer:
+    container_name: portainer
+    image: portainer/portainer-ce:latest
+    restart: unless-stopped
+    ports:
+      - "9001:9000"  # Portainer web UI (external:internal)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Required for container monitoring
+      - portainer-data:/data
+    networks:
+      - cartloading-network
+    environment:
+      - TZ=America/New_York
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+        compress: "true"
 
 networks:
   cartloading-network:
@@ -85,3 +110,6 @@ volumes:
       type: none
       o: bind
       device: /opt/cartloading/nodered/data
+
+  portainer-data:
+    driver: local
